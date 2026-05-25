@@ -190,6 +190,67 @@ try {
             }
             break;
 
+            case 'reviews':
+    if ($method === 'GET') {
+        $productId = $_GET['product_id'] ?? null;
+        if (!$productId) {
+            jsonResponse(['error' => 'product_id required'], 400);
+        }
+        // Get reviews with customer name
+        $stmt = $pdo->prepare("
+            SELECT r.id, r.rating, r.comment, r.review_date,
+                   c.first_name, c.last_name
+            FROM reviews r
+            JOIN customers c ON r.customer_id = c.id
+            WHERE r.product_id = ?
+            ORDER BY r.review_date DESC
+        ");
+        $stmt->execute([$productId]);
+        $reviews = $stmt->fetchAll();
+
+        // Also get average rating
+        $avgStmt = $pdo->prepare("SELECT AVG(rating) AS avg_rating, COUNT(*) AS total FROM reviews WHERE product_id = ?");
+        $avgStmt->execute([$productId]);
+        $stats = $avgStmt->fetch();
+
+        jsonResponse([
+            'reviews' => $reviews,
+            'avg_rating' => round($stats['avg_rating'] ?? 0, 1),
+            'total' => (int)$stats['total']
+        ]);
+    }
+    break;
+
+    case 'add_review':
+    if ($method === 'POST') {
+        $customerId = $_SESSION['customer_id'] ?? null;
+        if (!$customerId) {
+            jsonResponse(['error' => 'Niste prijavljeni. Molimo odaberite kupca.'], 401);
+        }
+        $body = getBody();
+        $productId = $body['product_id'] ?? null;
+        $rating = $body['rating'] ?? null;
+        $comment = $body['comment'] ?? '';
+
+        if (!$productId || !$rating || $rating < 1 || $rating > 5) {
+            jsonResponse(['error' => 'Potrebni su product_id i rating (1-5).'], 400);
+        }
+
+        // Check if customer already reviewed this product (optional, but good practice)
+        $check = $pdo->prepare("SELECT id FROM reviews WHERE product_id = ? AND customer_id = ?");
+        $check->execute([$productId, $customerId]);
+        if ($check->fetch()) {
+            jsonResponse(['error' => 'Već ste ostavili recenziju za ovaj proizvod.'], 409);
+        }
+
+        $stmt = $pdo->prepare("INSERT INTO reviews (product_id, customer_id, rating, comment, review_date) VALUES (?, ?, ?, ?, CURDATE())");
+        $stmt->execute([$productId, $customerId, $rating, $comment]);
+
+        jsonResponse(['success' => true, 'message' => 'Recenzija uspješno dodana.'], 201);
+    }
+    break;
+
+    
         default:
             jsonResponse(['error' => 'Unknown action'], 404);
     }
